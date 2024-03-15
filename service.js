@@ -11,6 +11,8 @@ var os = require('os');
 const { exec } = require('child_process');
 const { Worker} = require('worker_threads');
 
+
+//Excel upload to load data to the database using worker thread
 exports.uploadXLXS = async (req, res) => {
   try {
     if (!req.files || !req.files.media) {
@@ -30,6 +32,8 @@ exports.uploadXLXS = async (req, res) => {
   }
 };
 
+
+//function to process the file
 exports.processFile = (fileName) => {
   return new Promise((resolve, reject) => {
     console.log(typeof fileName)
@@ -43,6 +47,7 @@ exports.processFile = (fileName) => {
   });
 };
 
+//search function to fetch data from policy table using username
 module.exports.search = async(req,res)=>{
   const { firstName } = req.body
   const user = await User.findOne({firstName : firstName});
@@ -50,10 +55,10 @@ module.exports.search = async(req,res)=>{
       console.log({ message: 'User not found' });
   }
   const policies = await PolicyInfo.find({ userid: user._id });
-
   return policies ;
 }
 
+//Function to get policyInfo based on userid
 module.exports.policyInfo = async (req, res) => {
   try {
       const {userid} = req.body;
@@ -90,7 +95,7 @@ module.exports.checkCPU = async()=> {
 
 // Function to restart the server
 function restartServer() {
-    const child = exec('pm2 restart DESKTOP-S7I3TH4'); // Use any process manager like pm2
+    const child = exec('pm2 restart DESKTOP-S7I3TH4'); //restart the server using pm2
     child.stdout.on('data', (data) => {
         console.log(`stdout: ${data}`);
     });
@@ -106,55 +111,61 @@ function restartServer() {
 setInterval(module.exports.checkCPU, 5000);
 
 
+//function to move message based on timestamp from one collection to other collection
 const uri = 'mongodb+srv://mashwini099:yZ1nU7bnuyT8c9HV@test-pro-db.adi1sep.mongodb.net/demo?retryWrites=true&w=majority';
 
-let agenda = new Agenda({ db: { address: uri ,collection: 'jobs' } ,timezone: 'Asia/Kolkata'});
-console.log(uri)
-  module.exports.saveMessage= async(req,res)=>{
-    try {
-      const { message, timestamp } = req.body;
-  
-      // Save the message and timestamp into collection1
-      await Chat.create({ message, timestamp });
-      const timestampUTC = new Date(req.body.timestamp + 'Z');
-      // Schedule the job to run at the provided timestamp
-      await agenda.schedule(timestamp, 'transferMessages',{ timestamp: timestampUTC });
-  
-      console.log('Message saved successfully');
-     
-    } catch (error) {
-      console.error('Error saving message:', error);
-     
-    }
+let agenda = new Agenda({ db: { address: uri ,collection: 'jobs' }, timezone: 'Asia/Kolkata' });
 
+module.exports.saveMessage = async (req, res) => {
+      try {
+              const { message, timestamp } = req.body;
+          
+        // Save the message and timestamp into collection1
+        await Chat.create({ message, timestamp: timestamp });
+        const timestampUTC = new Date(req.body.timestamp + 'Z');
+
+        // Schedule the job to run at the calculated timestamp
+        await agenda.schedule(timestamp, 'transferMessages', { timestamp: timestampUTC });
+
+        console.log('Message saved successfully');
+   
+    } catch (error) {
+        console.error('Error saving message:', error);
+  
+    }
 };
 
-
-
-agenda.define('transferMessages', async (job) => {
+agenda.define('transferMessages', async () => {
   try {
-    const timestamp = job.attrs.data.timestamp;
+      const timestamp = new Date();
 
-    // Find messages in collection1 with timestamp less than or equal to the provided timestamp
-    const messages = await Chat.find({ timestamp: { $lte: timestamp } });
+      // Find messages in chat collection with timestamp less than or equal to the provided timestamp
+      const messages = await Chat.find({ timestamp: { $lte: timestamp } });
+      console.log('Messages to transfer:', messages);
 
-    // Transfer each message to collection2 and delete from collection1
-    for (const message of messages) {
-      await Message.create(message);
-      await Chat.deleteOne({ _id: message._id });
-      console.log('Message transferred from collection1 to collection2:', message);
-    }
+      // Transfer each message to collection2 and delete from collection1
+      for (const msg of messages) { 
+        const messageId = msg._id; 
+        delete msg._id; 
+        console.log('Processing message:', msg); 
+
+        const { message, timestamp } = msg;
+          // Create a new message in the Message model
+          const newMessage = await Message.create({  message, timestamp });
+          console.log('New message created:', newMessage);
+
+          // Delete the message from the Chat model
+          const deletedMessage = await Chat.deleteOne({ _id: messageId });
+          console.log('Message deleted from collection1:', deletedMessage);
+      }
   } catch (error) {
-    console.error('Error transferring messages:', error);
+      console.error('Error transferring messages:', error);
   }
 });
 
-
-agenda.on('ready',function(){
-  agenda.start()
-})
-
-
+agenda.on('ready', function () {
+    agenda.start();
+});
 
 
 
